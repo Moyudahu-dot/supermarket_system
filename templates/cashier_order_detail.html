@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h3>Order Details</h3>
+
+    {% if details %}
+    <table class="table table-bordered table-hover">
+        <thead class="table-dark">
+            <tr>
+                <th>Order ID</th>
+                <th>Product</th>
+                <th>Code</th>
+                <th>Quantity</th>
+                <th>Selling Price</th>
+                <th>Subtotal</th>
+                <th>Profit</th>
+                <th>Sale Time</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in details %}
+            <tr>
+                <td>{{ d[0] }}</td>
+                <td>{{ d[1] }}</td>
+                <td>{{ d[2] }}</td>
+                <td>{{ d[3] }}</td>
+                <td>{{ d[4] }}</td>
+                <td>{{ d[5] }}</td>
+                <td>{{ d[6] }}</td>
+                <td>{{ d[7] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="alert alert-secondary">
+        No details found for this order.
+    </div>
+    {% endif %}
+
+    <a href="/sales/orders" class="btn btn-secondary">Back</a>
+</div>
+{% endblock %}

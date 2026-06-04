@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Sales System</h2>
+
+{% with messages = get_flashed_messages() %}
+{% if messages %}
+<div class="alert alert-info">
+    {{ messages[0] }}
+</div>
+{% endif %}
+{% endwith %}
+
+<form method="get" action="/sales" class="row g-3 mb-3">
+    <div class="col-md-6">
+        <input type="text" name="keyword" class="form-control"
+               placeholder="Search product by name, code, or manufacturer"
+               value="{{ keyword }}">
+    </div>
+
+    <div class="col-md-2">
+        <button type="submit" class="btn btn-primary w-100">Search</button>
+    </div>
+
+    <div class="col-md-2">
+        <a href="/sales" class="btn btn-secondary w-100">Reset</a>
+    </div>
+</form>
+
+
+{% if search_message %}
+<div class="alert alert-secondary">
+    {{ search_message }}
+</div>
+{% endif %}
+
+<h4>Current Order</h4>
+
+<table class="table table-bordered">
+    <thead>
+        <tr>
+            <th>Product</th>
+            <th>Price</th>
+            <th>Quantity</th>
+            <th>Subtotal</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody id="orderItems"></tbody>
+</table>
+
+<h5>Total: ￥<span id="totalAmount">0.00</span></h5>
+
+<button class="btn btn-success" onclick="confirmOrder()">Confirm Order</button>
+
+<div class="card">
+    <div class="card-header">Product List</div>
+
+    <div class="card-body">
+        <table class="table table-bordered table-hover">
+            <thead class="table-dark">
+                 <tr>
+                     <th>ID</th>
+                    <th>Name</th>
+                     <th>Code</th>
+                    <th>Price</th>
+                    <th>Stock</th>
+                    <th>Manufacturer</th>
+                    <th>Quantity</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+
+           <tbody>
+           {% for p in products %}
+           <tr>
+               <td>{{ p[0] }}</td>
+               <td>{{ p[1] }}</td>
+               <td>{{ p[2] }}</td>
+               <td>{{ p[3] }}</td>
+               <td>{{ p[4] }}</td>
+                <td>{{ p[5] }}</td>
+
+    <td>
+        <input
+            type="number"
+            id="qty_{{ p[0] }}"
+            class="form-control"
+            value="1"
+            min="1"
+            style="width:80px;">
+    </td>
+
+    <td>
+        <button
+            class="btn btn-primary btn-sm"
+            onclick="addToOrder(
+                {{ p[0] }},
+                '{{ p[1] }}',
+                {{ p[3] }},
+                {{ p[4] }}
+            )">
+            Add
+        </button>
+    </td>
+
+</tr>
+{% endfor %}
+</tbody>
+        </table>
+    </div>
+</div>
+
+
+<script>
+let cart = [];
+
+function addToOrder(productId, productName, price, stock) {
+    const quantity = parseInt(document.getElementById("qty_" + productId).value);
+
+    if (!quantity || quantity <= 0) {
+        alert("Please enter a valid quantity.");
+        return;
+    }
+
+    if (quantity > stock) {
+        alert("Not enough stock.");
+        return;
+    }
+
+    const existing = cart.find(item => item.product_id === productId);
+
+    if (existing) {
+        if (existing.quantity + quantity > stock) {
+            alert("Total quantity exceeds stock.");
+            return;
+        }
+        existing.quantity += quantity;
+        existing.subtotal = existing.quantity * existing.unit_price;
+    } else {
+        cart.push({
+            product_id: productId,
+            product_name: productName,
+            unit_price: price,
+            quantity: quantity,
+            subtotal: price * quantity
+        });
+    }
+
+    renderOrder();
+}
+
+function renderOrder() {
+    const tbody = document.getElementById("orderItems");
+    tbody.innerHTML = "";
+
+    let total = 0;
+
+    cart.forEach((item, index) => {
+        total += item.subtotal;
+
+        tbody.innerHTML += `
+            <tr>
+                <td>${item.product_name}</td>
+                <td>${item.unit_price.toFixed(2)}</td>
+                <td>${item.quantity}</td>
+                <td>${item.subtotal.toFixed(2)}</td>
+                <td>
+                    <button class="btn btn-danger btn-sm" onclick="removeItem(${index})">Remove</button>
+                </td>
+            </tr>
+        `;
+    });
+
+    document.getElementById("totalAmount").innerText = total.toFixed(2);
+}
+
+function removeItem(index) {
+    cart.splice(index, 1);
+    renderOrder();
+}
+
+function confirmOrder() {
+    if (cart.length === 0) {
+        alert("Order is empty.");
+        return;
+    }
+
+    fetch("/confirm_order", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ items: cart })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert("Order created successfully!");
+            cart = [];
+            renderOrder();
+            location.reload();
+        } else {
+            alert(data.message);
+        }
+    });
+}
+</script>
+{% endblock %}

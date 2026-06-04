@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>My Orders</h2>
+
+<div class="card">
+    <div class="card-body">
+        <table class="table table-bordered table-hover">
+            <thead class="table-dark">
+            <tr>
+                <th>Order ID</th>
+                <th>Total Amount</th>
+                <th>Profit</th>
+                <th>Sale Time</th>
+            </tr>
+            </thead>
+
+            <tbody>
+            {% for o in orders %}
+            <tr>
+                <td>{{ o[0] }}</td>
+                <td>{{ o[1] }}</td>
+                <td>{{ o[2] }}</td>
+                <td>{{ o[3] }}</td>
+                <td>
+                    <a href="/cashier/order/{{ o[0] }}" class="btn btn-sm btn-outline-primary">
+                     Details
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<a href="/sales" class="btn btn-secondary mt-3">Back</a>
+{% endblock %}

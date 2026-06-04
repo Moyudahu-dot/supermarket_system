@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Audit Logs</h2>
+
+<div class="card">
+    <div class="card-body">
+        {% if logs %}
+        <table class="table table-bordered table-hover">
+            <thead class="table-dark">
+            <tr>
+                <th>Log ID</th>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Action</th>
+                <th>Target Table</th>
+                <th>Target ID</th>
+                <th>Description</th>
+                <th>Time</th>
+            </tr>
+            </thead>
+
+            <tbody>
+            {% for log in logs %}
+            <tr>
+                <td>{{ log[0] }}</td>
+                <td>{{ log[1] }}</td>
+                <td>{{ log[2] }}</td>
+                <td>{{ log[3] }}</td>
+                <td>{{ log[4] }}</td>
+                <td>{{ log[5] }}</td>
+                <td>{{ log[6] }}</td>
+                <td>{{ log[7] }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="alert alert-secondary">
+            No audit logs found.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<a href="/users" class="btn btn-secondary mt-3">Back</a>
+{% endblock %}

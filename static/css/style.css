@@ -1,0 +1,39 @@
+body {
+    margin: 0;
+    background-color: #f4f6f9;
+    font-family: Arial, sans-serif;
+}
+
+.sidebar {
+    width: 230px;
+    min-height: 100vh;
+    background-color: #1f2937;
+}
+
+.sidebar a {
+    display: block;
+    color: #d1d5db;
+    text-decoration: none;
+    padding: 14px 24px;
+}
+
+.sidebar a:hover {
+    background-color: #374151;
+    color: white;
+}
+
+.main-content {
+    flex: 1;
+}
+
+.topbar {
+    height: 60px;
+    background-color: white;
+    border-bottom: 1px solid #ddd;
+    padding: 18px 24px;
+    font-weight: bold;
+}
+
+.content-area {
+    padding: 24px;
+}
