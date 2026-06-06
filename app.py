@@ -5,7 +5,8 @@ from services.product_service import (
     update_product,
     delete_product,
     add_product,
-    get_sales_statistics
+    get_sales_statistics,
+    add_batch
 )
 from services.user_service import (
     get_all_users,
@@ -145,12 +146,11 @@ def delete_product_route(product_id):
     return redirect("/products")
 @app.route("/products/add", methods=["POST"])
 def add_product_route():
-
     product_name = request.form.get("product_name")
     product_code = request.form.get("product_code")
-    category_id = request.form.get("category_id")
-    price = request.form.get("price")
-    stock_quantity = request.form.get("stock_quantity")
+    category_id = int(request.form.get("category_id"))
+    price = float(request.form.get("price"))
+    stock_quantity = int(request.form.get("stock_quantity"))
     manufacturer = request.form.get("manufacturer")
 
     add_product(
@@ -163,8 +163,16 @@ def add_product_route():
     )
 
     return redirect("/products")
+@app.route("/products/add_batch", methods=["POST"])
+def add_batch_route():
+    product_id = int(request.form.get("product_id"))
+    purchase_price = float(request.form.get("purchase_price"))
+    selling_price = float(request.form.get("selling_price"))
+    stock_quantity = int(request.form.get("stock_quantity"))
 
+    add_batch(product_id, purchase_price, selling_price, stock_quantity)
 
+    return redirect("/products")
 @app.route("/users")
 def users():
     user_list = get_all_users()
