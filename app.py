@@ -3,6 +3,7 @@ from services.product_service import (
     get_all_products,
     search_products,
     update_product,
+    update_batch,
     delete_product,
     add_product,
     get_sales_statistics,
@@ -19,12 +20,12 @@ from services.sales_service import (
     get_products_for_sales,
     search_products_for_sales,
     sell_product,
+    create_order,
     get_my_orders,
     get_order_details
 )
 from services.auth_service import check_login
 from services.audit_service import add_audit_log,get_audit_logs
-from db import get_connection
 from flask import Flask, render_template, request, redirect, flash, session, jsonify
 
 app = Flask(__name__)
@@ -119,13 +120,14 @@ def products():
 
 @app.route("/products/update", methods=["POST"])
 def update_product_route():
+    if not role_required('manager'):
+        return redirect('/login')
 
     product_id = request.form.get("product_id")
     product_name = request.form.get("product_name")
     price = request.form.get("price")
-    stock_quantity = request.form.get("stock_quantity")
 
-    update_product(product_id, product_name, price, stock_quantity)
+    update_product(product_id, product_name, price)
 
     add_audit_log(
         session['user_id'],
@@ -138,39 +140,110 @@ def update_product_route():
     )
 
     return redirect("/products")
+
+
+@app.route("/products/batches/update", methods=["POST"])
+def update_batch_route():
+    if not role_required('manager'):
+        return redirect('/login')
+
+    batch_id = request.form.get("batch_id")
+    purchase_price = float(request.form.get("purchase_price"))
+    selling_price = float(request.form.get("selling_price"))
+    stock_quantity = int(request.form.get("stock_quantity"))
+
+    update_batch(batch_id, purchase_price, selling_price, stock_quantity)
+
+    add_audit_log(
+        session['user_id'],
+        session['username'],
+        session['role'],
+        "UPDATE_BATCH",
+        "product_batches",
+        batch_id,
+        f"Updated batch {batch_id}"
+    )
+
+    return redirect("/products")
+
+
 @app.route("/products/delete/<int:product_id>")
 def delete_product_route(product_id):
+    if not role_required('manager'):
+        return redirect('/login')
 
     delete_product(product_id)
 
+    add_audit_log(
+        session['user_id'],
+        session['username'],
+        session['role'],
+        "DELETE_PRODUCT",
+        "products",
+        product_id,
+        f"Marked product {product_id} unavailable"
+    )
+
     return redirect("/products")
+
+
 @app.route("/products/add", methods=["POST"])
 def add_product_route():
+    if not role_required('manager'):
+        return redirect('/login')
+
     product_name = request.form.get("product_name")
     product_code = request.form.get("product_code")
     category_id = int(request.form.get("category_id"))
-    price = float(request.form.get("price"))
+    purchase_price = float(request.form.get("purchase_price"))
+    selling_price = float(request.form.get("selling_price"))
     stock_quantity = int(request.form.get("stock_quantity"))
     manufacturer = request.form.get("manufacturer")
 
-    add_product(
+    product_id = add_product(
         product_name,
         product_code,
         category_id,
-        price,
+        purchase_price,
+        selling_price,
         stock_quantity,
         manufacturer
     )
 
+    add_audit_log(
+        session['user_id'],
+        session['username'],
+        session['role'],
+        "ADD_PRODUCT",
+        "products",
+        product_id,
+        f"Added product {product_id} with initial batch"
+    )
+
     return redirect("/products")
+
+
 @app.route("/products/add_batch", methods=["POST"])
 def add_batch_route():
+    if not role_required('manager'):
+        return redirect('/login')
+
     product_id = int(request.form.get("product_id"))
     purchase_price = float(request.form.get("purchase_price"))
     selling_price = float(request.form.get("selling_price"))
     stock_quantity = int(request.form.get("stock_quantity"))
 
     add_batch(product_id, purchase_price, selling_price, stock_quantity)
+
+    add_audit_log(
+        session['user_id'],
+        session['username'],
+        session['role'],
+        "ADD_BATCH",
+        "product_batches",
+        product_id,
+        f"Added batch for product {product_id}"
+    )
 
     return redirect("/products")
 @app.route("/users")
@@ -239,6 +312,9 @@ def sales():
 
 @app.route("/sales/sell", methods=["POST"])
 def sell_product_route():
+    if not role_required('cashier'):
+        return redirect('/login')
+
     product_id = int(request.form.get("product_id"))
     quantity = int(request.form.get("quantity"))
     cashier_id = session["user_id"]
@@ -251,117 +327,41 @@ def sell_product_route():
 
 @app.route("/sales/orders")
 def my_orders():
+    if not role_required('cashier'):
+        return redirect('/login')
+
     cashier_id = session["user_id"]
     orders = get_my_orders(cashier_id)
     return render_template("orders.html", orders=orders)
 
 @app.route('/confirm_order', methods=['POST'])
 def confirm_order():
-    data = request.get_json()
+    if not role_required('cashier'):
+        return jsonify({'success': False, 'message': 'Please log in as a cashier.'})
+
+    data = request.get_json() or {}
     items = data.get('items', [])
 
     if not items:
         return jsonify({'success': False, 'message': 'Order is empty.'})
 
     cashier_id = session.get('user_id')
+    success, result = create_order(cashier_id, items)
 
-    conn = get_connection()
-    cur = conn.cursor()
+    if not success:
+        return jsonify({'success': False, 'message': result})
 
-    try:
-        total_amount = sum(float(item['subtotal']) for item in items)
+    add_audit_log(
+        session.get('user_id'),
+        session.get('username'),
+        session.get('role'),
+        "CREATE_ORDER",
+        "sales_orders",
+        result['order_id'],
+        f"Created order {result['order_id']}, total amount {result['total_amount']}"
+    )
 
-        cur.execute("""
-            INSERT INTO sales_orders (cashier_id, total_amount)
-            VALUES (%s, %s)
-            RETURNING order_id
-        """, (cashier_id, total_amount))
-
-        order_id = cur.fetchone()[0]
-
-        for item in items:
-            product_id = item['product_id']
-            quantity = int(item['quantity'])
-            unit_price = float(item['unit_price'])
-            subtotal = float(item['subtotal'])
-
-            cur.execute("""
-                SELECT stock_quantity
-                FROM products
-                WHERE product_id = %s
-            """, (product_id,))
-
-            result = cur.fetchone()
-
-            if result is None:
-                raise Exception("Product not found.")
-
-            stock = result[0]
-
-            if stock < quantity:
-                raise Exception("Not enough stock.")
-
-            cur.execute("""
-                SELECT batch_id, purchase_price, selling_price
-                FROM product_batches
-                WHERE product_id = %s
-                  AND stock_quantity >= %s
-                ORDER BY batch_id
-                LIMIT 1
-            """, (product_id, quantity))
-
-            price_row = cur.fetchone()
-
-            if price_row is None:
-                raise Exception("No enough batch stock for this product.")
-
-            batch_id = price_row[0]
-            purchase_price = float(price_row[1])
-            unit_price = float(price_row[2])
-            subtotal = unit_price * quantity
-            profit = (unit_price - purchase_price) * quantity
-
-            cur.execute("""
-                INSERT INTO sales_order_items
-                (order_id, product_id, batch_id, quantity, purchase_price, unit_price, subtotal, profit)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                order_id,
-                product_id,
-                batch_id,
-                quantity,
-                purchase_price,
-                unit_price,
-                subtotal,
-                profit
-            ))
-            cur.execute("""
-                UPDATE product_batches
-                SET stock_quantity = stock_quantity - %s
-                WHERE batch_id = %s
-            """, (quantity, batch_id))
-
-        conn.commit()
-
-        add_audit_log(
-            session.get('user_id'),
-            session.get('username'),
-            session.get('role'),
-            "CREATE_ORDER",
-            "sales_orders",
-            order_id,
-            f"Created order {order_id}, total amount {total_amount}"
-        )
-
-        return jsonify({'success': True, 'message': 'Order created successfully.'})
-
-    except Exception as e:
-        conn.rollback()
-        return jsonify({'success': False, 'message': str(e)})
-
-    finally:
-        cur.close()
-        conn.close()
+    return jsonify({'success': True, 'message': 'Order created successfully.'})
 
 @app.route('/cashier/order/<int:order_id>')
 def cashier_order_detail(order_id):

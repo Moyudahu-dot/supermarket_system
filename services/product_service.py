@@ -1,5 +1,18 @@
 from db import get_connection
 
+
+def _sync_product_stock(cur, product_id):
+    cur.execute("""
+        UPDATE products
+        SET stock_quantity = (
+            SELECT COALESCE(SUM(stock_quantity), 0)
+            FROM product_batches
+            WHERE product_id = %s
+        )
+        WHERE product_id = %s;
+    """, (product_id, product_id))
+
+
 def get_all_products():
     conn = get_connection()
     cur = conn.cursor()
@@ -11,15 +24,15 @@ def get_all_products():
             p.product_code,
             p.category_id,
             pb.batch_id,
-            pb.purchase_price,
-            pb.selling_price,
-            pb.stock_quantity,
+            COALESCE(pb.purchase_price, 0) AS purchase_price,
+            COALESCE(pb.selling_price, p.price) AS selling_price,
+            COALESCE(pb.stock_quantity, 0) AS stock_quantity,
             p.manufacturer
-    FROM products p
-    LEFT JOIN product_batches pb
-        ON p.product_id = pb.product_id
-    WHERE p.status = 'available'
-    ORDER BY p.product_id, pb.batch_id;
+        FROM products p
+        LEFT JOIN product_batches pb
+            ON p.product_id = pb.product_id
+        WHERE p.status = 'available'
+        ORDER BY p.product_id, pb.batch_id;
     """)
 
     rows = cur.fetchall()
@@ -28,6 +41,8 @@ def get_all_products():
     conn.close()
 
     return rows
+
+
 def search_products(keyword):
     conn = get_connection()
     cur = conn.cursor()
@@ -39,16 +54,19 @@ def search_products(keyword):
             p.product_code,
             p.category_id,
             b.batch_id,
-            COALESCE(b.purchase_price, p.price) AS cost_price,
+            COALESCE(b.purchase_price, 0) AS cost_price,
             COALESCE(b.selling_price, p.price) AS selling_price,
-            COALESCE(b.stock_quantity, p.stock_quantity) AS stock_quantity,
+            COALESCE(b.stock_quantity, 0) AS stock_quantity,
             p.manufacturer
         FROM products p
         LEFT JOIN product_batches b
             ON p.product_id = b.product_id
-        WHERE p.product_name ILIKE %s
-           OR p.product_code ILIKE %s
-           OR p.manufacturer ILIKE %s
+        WHERE p.status = 'available'
+          AND (
+              p.product_name ILIKE %s
+              OR p.product_code ILIKE %s
+              OR p.manufacturer ILIKE %s
+          )
         ORDER BY p.product_id, b.batch_id;
     """, (f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"))
 
@@ -56,28 +74,66 @@ def search_products(keyword):
     cur.close()
     conn.close()
     return rows
-def update_product(product_id, product_name, price, stock_quantity):
+
+
+def update_product(product_id, product_name, price):
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        UPDATE products
-        SET product_name = %s,
-            price = %s,
-            stock_quantity = %s
-        WHERE product_id = %s;
-    """, (product_name, price, stock_quantity, product_id))
+    try:
+        cur.execute("""
+            UPDATE products
+            SET product_name = %s,
+                price = %s
+            WHERE product_id = %s
+              AND status = 'available';
+        """, (product_name, price, product_id))
 
-    cur.execute("""
-        UPDATE product_batches
-        SET selling_price = %s,
-            stock_quantity = %s
-        WHERE product_id = %s;
-    """, (price, stock_quantity, product_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
 
-    conn.commit()
-    cur.close()
-    conn.close()
+
+def update_batch(batch_id, purchase_price, selling_price, stock_quantity):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE product_batches
+            SET purchase_price = %s,
+                selling_price = %s,
+                stock_quantity = %s
+            WHERE batch_id = %s
+            RETURNING product_id;
+        """, (purchase_price, selling_price, stock_quantity, batch_id))
+
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError("Batch does not exist.")
+
+        product_id = row[0]
+        _sync_product_stock(cur, product_id)
+
+        cur.execute("""
+            UPDATE products
+            SET price = %s
+            WHERE product_id = %s;
+        """, (selling_price, product_id))
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
+
+
 def delete_product(product_id):
     conn = get_connection()
     cur = conn.cursor()
@@ -91,11 +147,14 @@ def delete_product(product_id):
     conn.commit()
     cur.close()
     conn.close()
+
+
 def add_product(
     product_name,
     product_code,
     category_id,
-    price,
+    purchase_price,
+    selling_price,
     stock_quantity,
     manufacturer
 ):
@@ -119,19 +178,41 @@ def add_product(
             product_name,
             product_code,
             category_id,
-            price,
+            selling_price,
             stock_quantity,
             manufacturer
         ))
 
+        product_id = cur.fetchone()[0]
 
+        cur.execute("""
+            INSERT INTO product_batches
+            (
+                product_id,
+                purchase_price,
+                selling_price,
+                stock_quantity
+            )
+            VALUES (%s, %s, %s, %s);
+        """, (
+            product_id,
+            purchase_price,
+            selling_price,
+            stock_quantity
+        ))
+
+        _sync_product_stock(cur, product_id)
         conn.commit()
+        return product_id
 
-
-
+    except Exception as e:
+        conn.rollback()
+        raise e
     finally:
         cur.close()
         conn.close()
+
+
 def add_batch(product_id, purchase_price, selling_price, stock_quantity):
     conn = get_connection()
     cur = conn.cursor()
@@ -153,20 +234,13 @@ def add_batch(product_id, purchase_price, selling_price, stock_quantity):
             stock_quantity
         ))
 
+        _sync_product_stock(cur, product_id)
+
         cur.execute("""
             UPDATE products
-            SET stock_quantity = (
-                SELECT COALESCE(SUM(stock_quantity), 0)
-                FROM product_batches
-                WHERE product_id = %s
-            ),
-            price = %s
+            SET price = %s
             WHERE product_id = %s;
-        """, (
-            product_id,
-            selling_price,
-            product_id
-        ))
+        """, (selling_price, product_id))
 
         conn.commit()
 
@@ -177,6 +251,8 @@ def add_batch(product_id, purchase_price, selling_price, stock_quantity):
     finally:
         cur.close()
         conn.close()
+
+
 def get_sales_statistics():
     conn = get_connection()
     cur = conn.cursor()
