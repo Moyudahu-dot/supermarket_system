@@ -1,5 +1,5 @@
 from db import get_connection
-from werkzeug.security import check_password_hash, generate_password_hash
+from services.auth_service import hash_password, verify_password
 
 def get_all_users():
     conn = get_connection()
@@ -24,7 +24,7 @@ def add_user(username, password, role, full_name, phone):
     cur.execute("""
         INSERT INTO users (username, password, role, full_name, phone, status)
         VALUES (%s, %s, %s, %s, %s, 'active');
-    """, (username, password, role, full_name, phone))
+    """, (username, hash_password(password), role, full_name, phone))
 
     conn.commit()
     cur.close()
@@ -79,14 +79,12 @@ def change_password(user_id, old_password, new_password):
 
     stored_password = row[0]
 
-    if stored_password == old_password:
-        pass
-    elif not check_password_hash(stored_password, old_password):
+    if not verify_password(stored_password, old_password):
         cur.close()
         conn.close()
         return False, "Old password is incorrect."
 
-    new_hashed_password = generate_password_hash(new_password)
+    new_hashed_password = hash_password(new_password)
 
     cur.execute("""
         UPDATE users
