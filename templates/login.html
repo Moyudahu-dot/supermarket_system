@@ -42,9 +42,27 @@
                            required>
                 </div>
 
+                {% if captcha_code %}
+                <div class="mb-3">
+                    <label class="form-label">Verification Code</label>
+                    <div class="input-group">
+                        <span class="input-group-text fw-bold">{{ captcha_code }}</span>
+                        <input type="text"
+                               name="captcha"
+                               class="form-control"
+                               placeholder="Enter the code"
+                               required>
+                    </div>
+                </div>
+                {% endif %}
+
                 <button type="submit" class="btn btn-primary w-100">
                     Login
                 </button>
+
+                <div class="text-center mt-3">
+                    <a href="/register">Create a cashier account</a>
+                </div>
 
             </form>
 
