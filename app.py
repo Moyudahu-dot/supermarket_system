@@ -24,12 +24,23 @@ from services.sales_service import (
     get_my_orders,
     get_order_details
 )
-from services.auth_service import check_login
+from services.auth_service import (
+    check_login,
+    generate_captcha_code,
+    get_login_risk,
+    register_login_failure,
+)
 from services.audit_service import add_audit_log,get_audit_logs
 from flask import Flask, render_template, request, redirect, flash, session, jsonify
+from datetime import timedelta
 
 app = Flask(__name__)
 app.secret_key = "supermarket_secret_key"
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
+)
 def login_required():
     return 'user_id' in session
 
@@ -46,21 +57,38 @@ def index():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form.get("username").strip()
-        password = request.form.get("password").strip()
+        username = (request.form.get("username") or "").strip()
+        password = (request.form.get("password") or "").strip()
+        captcha = (request.form.get("captcha") or "").strip()
+
+        risk = get_login_risk(username)
+        if risk["locked_until"]:
+            flash("Too many failed attempts. Please try again later.")
+            return redirect("/login")
+
+        if risk["requires_captcha"] and captcha != session.get("login_captcha"):
+            session["login_captcha"] = generate_captcha_code()
+            flash("Please enter the correct verification code.")
+            return redirect("/login")
 
         user = check_login(username, password)
 
         if user is None:
+            risk = register_login_failure(username)
+            if risk["requires_captcha"]:
+                session["login_captcha"] = generate_captcha_code()
             flash("Incorrect username or password.")
             return redirect("/login")
 
         user_id, username, role, status = user
 
         if status != "active":
+            register_login_failure(username)
             flash("This account is inactive.")
             return redirect("/login")
 
+        session.clear()
+        session.permanent = True
         session["user_id"] = user_id
         session["username"] = username
         session["role"] = role
@@ -85,13 +113,48 @@ def login():
             flash("Unknown role.")
             return redirect("/login")
 
-    return render_template("login.html")
+    captcha_code = session.get("login_captcha")
+    return render_template("login.html", captcha_code=captcha_code)
 
 
 @app.route("/logout")
 def logout():
+    if "user_id" in session:
+        add_audit_log(
+            session.get("user_id"),
+            session.get("username"),
+            session.get("role"),
+            "LOGOUT",
+            "users",
+            session.get("user_id"),
+            f"User {session.get('username')} logged out"
+        )
     session.clear()
     return redirect("/login")
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        password = (request.form.get("password") or "").strip()
+        confirm_password = (request.form.get("confirm_password") or "").strip()
+        full_name = (request.form.get("full_name") or "").strip()
+        phone = (request.form.get("phone") or "").strip()
+
+        if not username or not password:
+            flash("Username and password are required.")
+            return redirect("/register")
+
+        if password != confirm_password:
+            flash("Passwords do not match.")
+            return redirect("/register")
+
+        add_user(username, password, "cashier", full_name, phone)
+        flash("Registration successful. Please log in.")
+        return redirect("/login")
+
+    return render_template("register.html")
 
 @app.route("/products")
 def products():
@@ -248,14 +311,17 @@ def add_batch_route():
     return redirect("/products")
 @app.route("/users")
 def users():
-    user_list = get_all_users()
     if not role_required('admin'):
         return redirect('/login')
+    user_list = get_all_users()
     return render_template("users.html", users=user_list)
 
 
 @app.route("/users/add", methods=["POST"])
 def add_user_route():
+    if not role_required('admin'):
+        return redirect('/login')
+
     username = request.form.get("username")
     password = request.form.get("password")
     role = request.form.get("role")
@@ -269,6 +335,9 @@ def add_user_route():
 
 @app.route("/users/update", methods=["POST"])
 def update_user_route():
+    if not role_required('admin'):
+        return redirect('/login')
+
     user_id = request.form.get("user_id")
     role = request.form.get("role")
     status = request.form.get("status")
@@ -280,6 +349,9 @@ def update_user_route():
 
 @app.route("/users/delete/<int:user_id>")
 def delete_user_route(user_id):
+    if not role_required('admin'):
+        return redirect('/login')
+
     delete_user(user_id)
     return redirect("/users")
 
